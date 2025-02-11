@@ -1,0 +1,179 @@
+---
+- name: Setup disk and install Redis
+  hosts: all
+  become: yes
+  vars:
+    disk_device: "/dev/sdb"  # Default disk, will be updated based on user input
+    mount_point: "/data"
+    redis_version: "7.2.5"
+    redis_url: "https://download.redis.io/releases/redis-7.2.5.tar.gz"
+    redis_user: "redis"
+    redis_group: "redis"
+
+  tasks:
+    - name: Check if /data directory exists
+      stat:
+        path: "{{ mount_point }}"
+      register: data_dir
+
+    - name: Display block devices if /data does not exist
+      command: lsblk -f
+      register: lsblk_output
+      when: not data_dir.stat.exists
+
+    - name: Show block devices to user
+      debug:
+        var: lsblk_output.stdout_lines
+      when: not data_dir.stat.exists
+
+    - name: Prompt for disk device if /data does not exist
+      pause:
+        prompt: "Enter the disk device to format and mount (e.g., /dev/sdb):"
+      register: user_disk_input
+      when: not data_dir.stat.exists
+
+    - name: Set disk_device variable from user input
+      set_fact:
+        disk_device: "{{ user_disk_input.user_input }}"
+      when: not data_dir.stat.exists
+
+    - name: Install required packages
+      dnf:
+        name:
+          - wget
+          - make
+          - gcc
+        state: present
+
+    - name: Create XFS filesystem on the disk
+      filesystem:
+        fstype: xfs
+        dev: "{{ disk_device }}"
+      when: not data_dir.stat.exists
+
+    - name: Create mount point directory
+      file:
+        path: "{{ mount_point }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      when: not data_dir.stat.exists
+
+    - name: Mount the disk
+      mount:
+        path: "{{ mount_point }}"
+        src: "{{ disk_device }}"
+        fstype: xfs
+        state: mounted
+      when: not data_dir.stat.exists
+
+    - name: Ensure the mount persists on reboot
+      mount:
+        path: "{{ mount_point }}"
+        src: "{{ disk_device }}"
+        fstype: xfs
+        opts: defaults
+        state: present
+      when: not data_dir.stat.exists
+
+    - name: Create necessary directories under /data
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ mount_point }}/tools"
+        - "{{ mount_point }}/tools/repository"
+        - "{{ mount_point }}/redis"
+        - "{{ mount_point }}/redis/config"
+        - "{{ mount_point }}/redis/data"
+        - "{{ mount_point }}/redis/init"
+        - "{{ mount_point }}/redis/logs"
+
+    - name: Download Redis tarball
+      get_url:
+        url: "{{ redis_url }}"
+        dest: "{{ mount_point }}/tools/repository/redis-{{ redis_version }}.tar.gz"
+
+    - name: Extract Redis tarball
+      unarchive:
+        src: "{{ mount_point }}/tools/repository/redis-{{ redis_version }}.tar.gz"
+        dest: "{{ mount_point }}/tools/repository"
+        remote_src: yes
+
+    - name: Compile Redis
+      command: make
+      args:
+        chdir: "{{ mount_point }}/tools/repository/redis-{{ redis_version }}"
+
+    - name: Copy Redis binaries to /usr/bin
+      copy:
+        src: "{{ item }}"
+        dest: "/usr/bin/"
+        remote_src: yes
+      loop: "{{ lookup('fileglob', mount_point + '/tools/repository/redis-' + redis_version + '/src/redis-*', wantlist=True) }}"
+
+    - name: Copy Redis configuration files
+      copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        remote_src: yes
+      loop:
+        - { src: "{{ mount_point }}/tools/repository/redis-{{ redis_version }}/redis.conf", dest: "{{ mount_point }}/redis/config/redis.conf" }
+        - { src: "{{ mount_point }}/tools/repository/redis-{{ redis_version }}/sentinel.conf", dest: "{{ mount_point }}/redis/config/sentinel.conf" }
+
+    - name: Create redis.service
+      copy:
+        dest: /etc/systemd/system/redis.service
+        content: |
+          [Unit]
+          Description=Redis persistent key-value database
+          After=network.target
+
+          [Service]
+          ExecStart=/usr/bin/redis-server {{ mount_point }}/redis/config/redis.conf --supervised systemd
+          ExecStop={{ mount_point }}/redis/init/redis-shutdown
+          Type=forking
+          User={{ redis_user }}
+          Group={{ redis_group }}
+          LimitNOFILE=10000
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Create sentinel.service
+      copy:
+        dest: /etc/systemd/system/sentinel.service
+        content: |
+          [Unit]
+          Description=Redis Sentinel for high availability
+          After=network.target
+
+          [Service]
+          ExecStart=/usr/bin/redis-sentinel {{ mount_point }}/redis/config/sentinel.conf --supervised systemd
+          ExecStop={{ mount_point }}/redis/init/redis-shutdown
+          Type=forking
+          User={{ redis_user }}
+          Group={{ redis_group }}
+          LimitNOFILE=10000
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd and enable services
+      systemd:
+        daemon_reload: yes
+        enabled: yes
+        name: "{{ item }}"
+      loop:
+        - redis.service
+        - sentinel.service
+
+    - name: Start Redis and Sentinel services
+      systemd:
+        name: "{{ item }}"
+        state: started
+      loop:
+        - redis.service
+        - sentinel.service
