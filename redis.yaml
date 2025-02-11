@@ -3,7 +3,6 @@
   hosts: all
   become: yes
   vars:
-    disk_device: "/dev/sdb"  # Default disk, will be updated based on user input
     mount_point: "/data"
     redis_version: "7.2.5"
     redis_url: "https://download.redis.io/releases/redis-7.2.5.tar.gz"
