@@ -31,10 +31,16 @@
       register: user_disk_input
       when: not data_dir.stat.exists
 
-    - name: Set disk_device variable from user input
+    - name: Set disk_device variable from user input or inventory
       set_fact:
-        disk_device: "{{ user_disk_input.user_input }}"
+        disk_device: "{{ user_disk_input.user_input | default(disk_device, true) }}"
       when: not data_dir.stat.exists
+
+    - name: Rename ha.repo to ha.repo.old if it exists
+      command: mv /etc/yum.repos.d/ha.repo /etc/yum.repos.d/ha.repo.old
+      args:
+        removes: /etc/yum.repos.d/ha.repo.old
+      when: ansible_facts['distribution'] == 'RedHat' or ansible_facts['distribution'] == 'CentOS'
 
     - name: Install required packages
       dnf:
