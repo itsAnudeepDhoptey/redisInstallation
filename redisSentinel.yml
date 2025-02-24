@@ -61,6 +61,9 @@
     - name: Install rust
       shell: "sh /data/tools/repository/rustup-init.sh -y"
 
+    - name: Add rust to PATH
+      shell: "source $HOME/.cargo/env"
+
     - name: Download Redis
       get_url:
         url: "http://download.redis.io/releases/redis-{{ redis_version }}.tar.gz"
