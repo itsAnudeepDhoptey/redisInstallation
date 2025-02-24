@@ -1,6 +1,6 @@
 ---
 - name: Setup disk and install Redis
-  hosts: all
+  hosts: redis-servers
   become: yes
   vars:
     mount_point: "/data"
