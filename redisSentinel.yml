@@ -76,6 +76,9 @@
     - name: Extract Redis
       shell: "tar -xzf /data/tools/repository/redis-{{ redis_version }}.tar.gz -C /data/tools/repository/"
 
+    - name: Add rust to PATH
+      shell: "source $HOME/.cargo/env"
+
     - name: Compile Redis
       shell: "cd /data/tools/repository/redis-{{ redis_version }} && make"
       
