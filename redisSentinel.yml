@@ -6,7 +6,7 @@
     redis_user: "redis"
     redis_group: "redis"
     redis_version: "7.2.5"
-    redis_password: "vKsqdfIketX6G2G69HTeVKUN"
+    redis_password: "pass"
   become: yes
   gather_facts: yes
 
