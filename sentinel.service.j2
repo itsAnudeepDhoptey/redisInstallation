@@ -1,0 +1,14 @@
+[Unit]
+Description=Redis persistent key-value database
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/redis-sentinel /data/redis/config/sentinel.conf --supervised systemd
+ExecStop=/data/redis/redis-init/redis-shutdown
+Type=forking
+User=redis
+Group=redis
+LimitNOFILE=10000
+
+[Install]
+WantedBy=multi-user.target

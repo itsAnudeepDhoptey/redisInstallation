@@ -1,0 +1,150 @@
+---
+- name: Setup Redis Cluster with Master-Slave
+  hosts: all
+  vars:
+    mount_point: "/data"
+    redis_user: "redis"
+    redis_group: "redis"
+    redis_version: "7.2.5"
+    redis_password: "vKsqdfIketX6G2G69HTeVKUN"
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Create necessary directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /data
+
+    - name: Mount /data disk
+      mount:
+        path: "{{ mount_point }}"
+        src: "/dev/sdc"
+        fstype: xfs
+        state: mounted
+
+    - name: Install required packages
+      dnf:
+        name:
+          - wget
+          - make
+          - gcc
+          - tcl
+          - llvm-toolset
+        state: present
+
+    - name: Create necessary directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /data
+        - /data/tools
+        - /data/tools/repository
+        - /data/redis
+        - /data/redis/config
+        - /data/redis/data
+        - /data/redis/init
+        - /data/redis/logs
+    
+    
+    - name: Download rust installation script
+      get_url:
+        url: "https://sh.rustup.rs"
+        dest: "/data/tools/repository/rustup-init.sh"
+        mode: '0755'
+
+    - name: Install rust
+      shell: "sh /data/tools/repository/rustup-init.sh -y"
+
+    - name: Download Redis
+      get_url:
+        url: "http://download.redis.io/releases/redis-{{ redis_version }}.tar.gz"
+        dest: "/data/tools/repository/redis-{{ redis_version }}.tar.gz"
+        mode: '0755'
+
+    - name: Download RedisJson
+      get_url:
+        url: "https://github.com/RedisJSON/RedisJSON/archive/refs/tags/v2.8.7.zip"
+        dest: "/data/tools/repository/redisjson-2.8.7.zip"
+        mode: '0755'
+
+    - name: Extract Redis
+      shell: "tar -xzf /data/tools/repository/redis-{{ redis_version }}.tar.gz -C /data/tools/repository/"
+
+    - name: Compile Redis
+      shell: "cd /data/tools/repository/redis-{{ redis_version }} && make"
+      
+    - name: Extract RedisJson
+      shell: "unzip /data/tools/repository/redisjson-2.8.7.zip -d /data/tools/repository/"
+
+    - name: Compile RedisJson
+      shell: "cd /data/tools/repository/RedisJSON-2.8.7 && cargo build"
+
+    - name: Create redis group
+      group:
+        name: "{{ redis_group }}"
+        state: present
+
+    - name: Create redis user
+      user:
+        name: "{{ redis_user }}"
+        group: "{{ redis_group }}"
+        home: "/home/{{ redis_user }}"
+        shell: /bin/bash
+
+    - name: Copy Redis binaries to /usr/bin/
+      shell: "cp /data/tools/repository/redis-{{ redis_version }}/src/redis-server /usr/bin/ && cp /data/tools/repository/redis-{{ redis_version }}/src/redis-cli /usr/bin/ && cp /data/tools/repository/RedisJSON-2.8.7/target/debug/rejson.so /usr/lib64/redis/modules/"
+
+    - name: Copy Redis configuration file
+      template:
+        src: redis.conf.j2
+        dest: /data/redis/config/redis.conf
+        mode: '0644' 
+
+    - name: Copy Sentinel configuration file
+      template:
+        src: sentinel.conf.j2
+        dest: /data/redis/config/sentinel.conf
+        mode: '0644'
+
+    - name: Copy Redis service file
+      template:
+        src: redis.service.j2
+        dest: /etc/systemd/system/redis.service
+        mode: '0644'
+
+    - name: Copy Sentinel service file
+      template:
+        src: sentinel.service.j2
+        dest: /etc/systemd/system/sentinel.service
+        mode: '0644'  
+
+    - name: Change ownership of Redis directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ redis_user }}"
+        group: "{{ redis_group }}"
+        recurse: yes
+      loop:
+        - /data/redis
+        - /data/tools
+
+
+    - name: Start Sentinel service
+      systemd:
+        name: sentinel
+        state: started
+        enabled: yes
+
+    - name: Start Redis service
+      systemd:
+        name: redis
+        state: started
+        enabled: yes
+
